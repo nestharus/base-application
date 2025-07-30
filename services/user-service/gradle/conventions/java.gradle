@@ -1,0 +1,30 @@
+allprojects {
+    plugins.withId('java-library') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(javaVersion)
+            }
+        }
+
+        // JVM arguments for vector API
+        tasks.withType(JavaCompile).configureEach {
+            options.compilerArgs += ['--add-modules', 'jdk.incubator.vector']
+        }
+
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+
+            testLogging {
+                showStandardStreams = true
+                exceptionFormat = 'full'
+                events "passed", "skipped", "failed"
+            }
+
+            jvmArgs += ['--add-modules', 'jdk.incubator.vector', '--enable-preview', '--add-opens', 'java.base/java.lang=ALL-UNNAMED']
+        }
+
+        tasks.withType(JavaExec).configureEach {
+            jvmArgs += ['--add-modules', 'jdk.incubator.vector', '--enable-preview', '--add-opens', 'java.base/java.lang=ALL-UNNAMED']
+        }
+    }
+}

@@ -1,0 +1,6 @@
+type User extending AbstractRecord {
+  annotation title := 'User';
+  annotation description := 'A User in the system';
+
+  required email: str;
+}

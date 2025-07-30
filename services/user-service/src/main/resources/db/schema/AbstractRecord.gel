@@ -1,0 +1,29 @@
+abstract type AbstractRecord {
+  required last_modified: datetime {
+    annotation title := 'Last Modified';
+    annotation description := 'The last time the record was modified';
+    rewrite update using (datetime_of_statement());
+  }
+
+  required created: datetime {
+    annotation title := 'Created';
+    annotation description := 'The time the record was created';
+    rewrite insert using (datetime_of_statement());
+  }
+
+  required created_by: str {
+    annotation title := 'Created By';
+    annotation description := 'The user or system that created the record';
+  }
+
+  required last_modified_by: str {
+    annotation title := 'Modified By';
+    annotation description := 'The user or system that last modified the record';
+  }
+
+  required version: int {
+    default := 0;
+    annotation title := 'Version';
+    annotation description := 'The version of the record. update where version = version';
+  }
+}

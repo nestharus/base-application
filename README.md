@@ -1,0 +1,1 @@
+Need to get configuration up from environment variables AND flagsmith AND infisical

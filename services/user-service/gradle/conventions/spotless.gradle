@@ -1,0 +1,20 @@
+allprojects {
+    plugins.withId('com.diffplug.spotless') {
+        spotless {
+            lineEndings = 'UNIX'
+
+            java {
+                googleJavaFormat()
+                removeUnusedImports()
+                importOrder('java', 'javax', '', 'com.example')
+                target 'src/*/java/**/*.java'
+            }
+        }
+
+        tasks.withType(JavaCompile).tap {
+            configureEach { task ->
+                task.dependsOn tasks.named('spotlessApply')
+            }
+        }
+    }
+}

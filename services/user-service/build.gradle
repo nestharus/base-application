@@ -1,0 +1,54 @@
+plugins {
+    id 'java-library'
+    id 'application' // Added for running the application
+    alias(libs.plugins.versions) // For checking dependency updates
+    alias(libs.plugins.lombok) // For Lombok support
+    alias(libs.plugins.spotless) // For code formatting
+}
+
+apply from: 'gradle/conventions/java.gradle'
+apply from: 'gradle/conventions/lombok.gradle'
+apply from: 'gradle/conventions/spotless.gradle'
+apply from: 'gradle/conventions/sources.gradle'
+apply from: 'gradle/conventions/version.gradle'
+apply from: 'gradle/conventions/testing.gradle'
+
+version = projectVersion
+
+repositories {
+    mavenCentral()
+}
+
+// Enable dependency locking for all configurations
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+application {
+    mainClass = 'Server'
+}
+
+run {
+    jvmArgs = ['--add-modules', 'jdk.incubator.vector', '--enable-preview', '--add-opens', 'java.base/java.lang=ALL-UNNAMED']
+}
+
+dependencies {
+    implementation libs.vertx.core
+    implementation libs.vertx.web
+    implementation libs.vertx.codegen
+    implementation libs.dagger
+    implementation libs.netty
+    implementation libs.slf4j.api
+    implementation libs.slf4j.simple
+    implementation libs.geldata
+    implementation libs.jsr305
+    implementation libs.guava
+    implementation libs.apache.commons.lang3
+    implementation libs.vertx.config
+
+    annotationProcessor libs.dagger.compiler
+
+    testImplementation libs.vertx.unit
+    testImplementation libs.junit.jupiter
+    testImplementation libs.truth
+}

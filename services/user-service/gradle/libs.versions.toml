@@ -1,0 +1,44 @@
+[versions]
+vertx = "5.0.1"
+dagger = "2.57"
+netty = "4.2.3.Final"
+slf4j = "2.0.17"
+junit = "6.0.0-M2"
+lombok = "1.18.38"
+geldata = "0.4.0"
+jsr305 = "4.9.3"
+guava = "33.4.8-jre"
+truth = "1.4.4"
+apache-commons-lang3 = "3.18.0"
+
+[libraries]
+# Vertx dependencies
+vertx-core = { module = "io.vertx:vertx-core", version.ref = "vertx" }
+vertx-web = { module = "io.vertx:vertx-web", version.ref = "vertx" }
+vertx-unit = { module = "io.vertx:vertx-unit", version.ref = "vertx" }
+vertx-config = { module = "io.vertx:vertx-config", version.ref = "vertx" }
+
+# Other dependencies
+dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
+netty = { module = "io.netty:netty-all", version.ref = "netty" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+geldata = { module = "com.geldata:driver", version.ref = "geldata" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+truth = { module = "com.google.truth:truth", version.ref = "truth" }
+apache-commons-lang3 = { module = "org.apache.commons:commons-lang3", version.ref = "apache-commons-lang3" }
+
+# Tools
+lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
+vertx-codegen = { module = "io.vertx:vertx-codegen", version.ref = "vertx" }
+
+# Annotations
+jsr305 = { module = "com.github.spotbugs:spotbugs-annotations", version.ref = "jsr305" }
+
+[plugins]
+versions = { id = "com.github.ben-manes.versions", version = "0.52.0" }
+lombok = { id = "io.freefair.lombok", version = "8.14" }
+spotless = { id = "com.diffplug.spotless", version = "7.2.1" }

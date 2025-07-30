@@ -1,0 +1,9 @@
+allprojects {
+    plugins.withId('java-library') {
+        dependencies {
+            testImplementation libs.truth
+            testImplementation libs.junit.jupiter
+            testRuntimeOnly libs.junit.platform.launcher
+        }
+    }
+}
