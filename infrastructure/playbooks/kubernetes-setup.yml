@@ -1,0 +1,99 @@
+---
+- name: Configure Kubernetes cluster base settings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: Ensure kubectl is available
+      shell: kubectl version --client
+      register: kubectl_check
+      failed_when: kubectl_check.rc != 0
+      
+    - name: Create namespaces for core services
+      kubernetes.core.k8s:
+        name: "{{ item }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+      loop:
+        - crossplane-system
+        - flux-system
+        - monitoring
+        
+    - name: Apply pod security standards
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ item }}"
+            labels:
+              pod-security.kubernetes.io/enforce: baseline
+              pod-security.kubernetes.io/audit: restricted
+              pod-security.kubernetes.io/warn: restricted
+      loop:
+        - crossplane-system
+        - flux-system
+        - monitoring
+        
+    - name: Create default network policies
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: default-deny-ingress
+            namespace: "{{ item }}"
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+      loop:
+        - default
+        
+    - name: Create priority classes
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: "{{ item.name }}"
+          value: "{{ item.value }}"
+          globalDefault: "{{ item.default | default(false) }}"
+          description: "{{ item.description }}"
+      loop:
+        - name: system-critical
+          value: 2000000000
+          description: "Critical system components"
+        - name: high-priority
+          value: 1000000
+          description: "High priority workloads"
+        - name: medium-priority
+          value: 100
+          default: true
+          description: "Default priority for most workloads"
+        - name: low-priority
+          value: -100
+          description: "Low priority batch jobs"
+          
+    - name: Create resource quotas for default namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ResourceQuota
+          metadata:
+            name: default-quota
+            namespace: default
+          spec:
+            hard:
+              requests.cpu: "100"
+              requests.memory: "200Gi"
+              limits.cpu: "200"
+              limits.memory: "400Gi"
+              persistentvolumeclaims: "20"
+              services.loadbalancers: "5"

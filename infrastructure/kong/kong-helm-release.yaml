@@ -1,0 +1,129 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: kong
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.konghq.com
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: kong
+  namespace: kong
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kong
+      version: "2.35.0"
+      sourceRef:
+        kind: HelmRepository
+        name: kong
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Run Kong on general-public nodes alongside applications
+    nodeSelector:
+      node-type: general-public
+    
+    # Kong mode - with database for persistence
+    env:
+      database: "postgres"
+      pg_host: kong-postgresql
+      pg_database: kong
+      pg_user: kong
+      pg_password: kongpass
+      
+    # Admin API configuration
+    admin:
+      enabled: true
+      type: ClusterIP
+      annotations:
+        konghq.com/protocol: "http"
+        
+    # Proxy configuration
+    proxy:
+      enabled: true
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/vultr-loadbalancer-protocol: "tcp"
+        
+    # Manager (Kong Manager UI)
+    manager:
+      enabled: true
+      type: ClusterIP
+      
+    # Portal API
+    portalapi:
+      enabled: false
+      
+    # Developer Portal
+    portal:
+      enabled: false
+      
+    # Resource limits
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+        
+    # Autoscaling
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+      
+    # Pod disruption budget
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+      
+    # Ingress controller configuration
+    ingressController:
+      enabled: true
+      installCRDs: true
+      
+    # PostgreSQL subchart
+    postgresql:
+      enabled: true
+      auth:
+        username: kong
+        password: kongpass
+        database: kong
+      primary:
+        nodeSelector:
+          node-type: general-public
+        persistence:
+          enabled: true
+          size: 20Gi
+          storageClass: vultr-block-storage
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+            
+    # Service monitor for Prometheus
+    serviceMonitor:
+      enabled: true
+      
+    # Migration job configuration
+    migrations:
+      preUpgrade: true
+      postUpgrade: true
+      
+    # Priority class
+    priorityClassName: high-priority

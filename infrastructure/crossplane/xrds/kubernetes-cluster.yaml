@@ -1,0 +1,125 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xkubernetesclusters.infrastructure.base.io
+spec:
+  group: infrastructure.base.io
+  names:
+    kind: XKubernetesCluster
+    plural: xkubernetesclusters
+  claimNames:
+    kind: KubernetesCluster
+    plural: kubernetesclusters
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              parameters:
+                type: object
+                properties:
+                  region:
+                    type: string
+                    description: Vultr region for the cluster
+                    default: ewr
+                  version:
+                    type: string
+                    description: Kubernetes version
+                    default: v1.29.4+1
+                  clusterType:
+                    type: string
+                    description: Type of cluster (platform or application)
+                    enum:
+                      - platform
+                      - application
+                  environmentName:
+                    type: string
+                    description: Name of the environment (e.g., dev-team1, staging-qa, prod-main)
+                  environmentType:
+                    type: string
+                    description: Type of environment that determines resource allocation
+                    enum:
+                      - dev
+                      - staging
+                      - prod
+                      - sue
+                  enableHA:
+                    type: boolean
+                    description: Enable HA control plane
+                    default: true
+                  nodePools:
+                    type: array
+                    description: Node pool configurations
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        enabled:
+                          type: boolean
+                          default: true
+                        nodeQuantity:
+                          type: integer
+                          default: 1
+                        plan:
+                          type: string
+                        minNodes:
+                          type: integer
+                          default: 1
+                        maxNodes:
+                          type: integer
+                          default: 3
+                        labels:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        taints:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              value:
+                                type: string
+                              effect:
+                                type: string
+                                enum:
+                                  - NoSchedule
+                                  - PreferNoSchedule
+                                  - NoExecute
+                required:
+                  - region
+                  - clusterType
+            required:
+              - parameters
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              clusterEndpoint:
+                type: string
+              clusterID:
+                type: string
+              vpcID:
+                type: string

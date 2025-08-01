@@ -1,0 +1,168 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xkubernetesclusters.vultr.infrastructure.base.io
+  labels:
+    provider: vultr
+spec:
+  compositeTypeRef:
+    apiVersion: infrastructure.base.io/v1alpha1
+    kind: XKubernetesCluster
+  resources:
+    # VPC for the cluster
+    - name: vpc
+      base:
+        apiVersion: network.vultr.upbound.io/v1alpha1
+        kind: VPC
+        spec:
+          forProvider:
+            region: ewr
+            v4Subnet: "10.0.0.0"
+            v4SubnetMask: 24
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.clusterType
+          toFieldPath: spec.forProvider.description
+          transforms:
+            - type: string
+              string:
+                fmt: "VPC for %s cluster"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.clusterType
+          toFieldPath: spec.forProvider.v4Subnet
+          transforms:
+            - type: map
+              map:
+                platform: "10.1.0.0"
+                application: "10.0.0.0"
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.id
+          toFieldPath: status.vpcID
+    
+    # Kubernetes Cluster
+    - name: kubernetes-cluster
+      base:
+        apiVersion: kubernetes.vultr.upbound.io/v1alpha1
+        kind: Kubernetes
+        spec:
+          forProvider:
+            region: ewr
+            version: v1.29.4+1
+            enableHaControlPlanes: true
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.region
+          toFieldPath: spec.forProvider.region
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.version
+          toFieldPath: spec.forProvider.version
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.enableHA
+          toFieldPath: spec.forProvider.enableHaControlPlanes
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.environmentName
+          toFieldPath: spec.forProvider.label
+          transforms:
+            - type: string
+              string:
+                fmt: "k8s-%s"
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.endpoint
+          toFieldPath: status.clusterEndpoint
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.id
+          toFieldPath: status.clusterID
+    
+    # Dynamic Node Pools based on cluster type
+    - name: node-pool-general-restricted
+      base:
+        apiVersion: kubernetes.vultr.upbound.io/v1alpha1
+        kind: NodePool
+        spec:
+          forProvider:
+            clusterId: ""
+            nodeQuantity: 1
+            plan: vc2-2c-4gb
+            label: general-restricted
+            autoScaler: true
+            minNodes: 1
+            maxNodes: 4
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: status.clusterID
+          toFieldPath: spec.forProvider.clusterId
+          policy:
+            fromFieldPath: Required
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.clusterType
+          toFieldPath: spec.forProvider.maxNodes
+          transforms:
+            - type: map
+              map:
+                platform: 4
+                application: 2
+    
+    # Additional node pools for application clusters
+    - name: node-pool-general-public
+      base:
+        apiVersion: kubernetes.vultr.upbound.io/v1alpha1
+        kind: NodePool
+        spec:
+          forProvider:
+            clusterId: ""
+            nodeQuantity: 1
+            plan: vc2-2c-4gb
+            label: general-public
+            autoScaler: true
+            minNodes: 1
+            maxNodes: 1
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: status.clusterID
+          toFieldPath: spec.forProvider.clusterId
+          policy:
+            fromFieldPath: Required
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.clusterType
+          toFieldPath: spec.forProvider.nodeQuantity
+          transforms:
+            - type: map
+              map:
+                platform: 0
+                application: 1
+    
+    # Kubeconfig Secret
+    - name: kubeconfig
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha1
+        kind: Object
+        spec:
+          forProvider:
+            manifest:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: kubeconfig
+                namespace: flux-system
+              type: Opaque
+          providerConfigRef:
+            name: kubernetes-provider
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.uid
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+            - type: string
+              string:
+                fmt: "%s-kubeconfig"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.clusterType
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+          transforms:
+            - type: map
+              map:
+                platform: platform-flux-system
+                application: flux-system

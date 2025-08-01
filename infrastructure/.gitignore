@@ -1,0 +1,17 @@
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+backend-config.hcl
+
+# Kubernetes config
+kubeconfig
+
+# AWS/S3 credentials
+.aws/
+
+# Local testing
+*.log
+*.tmp

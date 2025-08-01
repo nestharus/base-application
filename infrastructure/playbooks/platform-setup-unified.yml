@@ -1,0 +1,43 @@
+---
+- name: Configure Platform Services
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    deployment_mode: "{{ deployment_mode | default('kubernetes') }}"
+    target_host: "{{ target_host | default('localhost') }}"
+    
+  tasks:
+    # Kubernetes-specific tasks
+    - name: Include Kubernetes platform setup
+      include_tasks: platform-setup.yml
+      when: deployment_mode == "kubernetes"
+    
+    # Container-specific tasks
+    - name: Include container platform setup
+      include_tasks: container-platform-setup.yml
+      when: deployment_mode == "container"
+    
+    # Common tasks for both modes
+    - name: Generate platform tokens
+      set_fact:
+        platform_tokens:
+          infisical_platform_token: "{{ lookup('password', '/tmp/infisical_token chars=ascii_letters,digits length=32') }}"
+          jfrog_api_key: "{{ lookup('password', '/tmp/jfrog_token chars=ascii_letters,digits length=32') }}"
+      no_log: true
+    
+    - name: Save platform configuration
+      copy:
+        content: |
+          ---
+          platform:
+            deployment_mode: {{ deployment_mode }}
+            services:
+              infisical:
+                url: "{{ 'http://infisical.infisical.svc.cluster.local:8080' if deployment_mode == 'kubernetes' else 'http://infisical:8080' }}"
+                admin_token: "{{ platform_tokens.infisical_platform_token }}"
+              jfrog:
+                url: "{{ 'http://artifactory.jfrog-artifactory.svc.cluster.local:8081' if deployment_mode == 'kubernetes' else 'http://artifactory:8081' }}"
+                api_key: "{{ platform_tokens.jfrog_api_key }}"
+        dest: "/tmp/platform-config.yaml"
+        mode: '0600'

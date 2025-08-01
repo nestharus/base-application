@@ -1,0 +1,52 @@
+---
+# Container monitoring stack deployment
+
+- name: Deploy Prometheus
+  docker_container:
+    name: "{{ environment_name }}-prometheus"
+    image: prom/prometheus:latest
+    state: started
+    networks:
+      - name: "{{ environment_name }}-network"
+    ports:
+      - "9090:9090"
+    volumes:
+      - "/data/{{ environment_name }}/prometheus:/prometheus"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+  delegate_to: "{{ target_host }}"
+
+- name: Deploy Grafana
+  docker_container:
+    name: "{{ environment_name }}-grafana"
+    image: grafana/grafana:latest
+    state: started
+    networks:
+      - name: "{{ environment_name }}-network"
+    ports:
+      - "3000:3000"
+    env:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - "/data/{{ environment_name }}/grafana:/var/lib/grafana"
+  delegate_to: "{{ target_host }}"
+
+- name: Configure Prometheus to scrape services
+  copy:
+    content: |
+      global:
+        scrape_interval: 15s
+      
+      scrape_configs:
+        - job_name: 'kong'
+          static_configs:
+            - targets: ['{{ environment_name }}-kong:8001']
+          metrics_path: /metrics
+        
+        - job_name: 'postgres'
+          static_configs:
+            - targets: ['{{ environment_name }}-postgres-exporter:9187']
+    dest: "/data/{{ environment_name }}/prometheus/prometheus.yml"
+  notify: restart prometheus

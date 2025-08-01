@@ -1,0 +1,64 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: user-service
+  namespace: flux-system
+spec:
+  image: jcr.example.com/base-application/user-service
+  interval: 5m
+  secretRef:
+    name: jcr-registry-secret
+  provider: generic
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: user-service
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: user-service
+  policy:
+    semver:
+      range: '>=1.0.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: user-service
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: user-service-infrastructure
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@example.com
+        name: fluxcdbot
+      messageTemplate: |
+        Automated image update
+        
+        Files:
+        {{ range .Updated.Files -}}
+        - {{ . }}
+        {{ end -}}
+        
+        Objects:
+        {{ range .Updated.Objects -}}
+        - {{ .Kind }} {{ .Namespace }}/{{ .Name }}
+        {{ end -}}
+        
+        Images:
+        {{ range .Updated.Images -}}
+        - {{ .Repository }}:{{ .Tag }}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    path: "./services/user-service/src/main/resources/infrastructure"
+    strategy: Setters

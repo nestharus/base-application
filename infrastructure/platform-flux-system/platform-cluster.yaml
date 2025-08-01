@@ -1,0 +1,24 @@
+apiVersion: infrastructure.base.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: platform-cluster
+  namespace: platform-flux-system
+spec:
+  parameters:
+    region: ewr
+    version: v1.29.4+1
+    clusterType: platform
+    enableHA: true
+    nodePools:
+      - name: general-restricted
+        enabled: true
+        nodeQuantity: 1
+        plan: vc2-2c-4gb
+        minNodes: 1
+        maxNodes: 4
+        labels:
+          node-type: general-restricted
+          cluster-type: platform
+          workload: platform-services
+  compositionRef:
+    name: xkubernetesclusters.vultr.infrastructure.base.io

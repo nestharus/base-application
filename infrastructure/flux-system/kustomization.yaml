@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Core Flux components (should be installed by flux bootstrap)
+  # - gotk-components.yaml
+  # - gotk-sync.yaml
+  
+  # Infrastructure sources and kustomizations
+  - infrastructure-sync.yaml
+  - node-pools-sync.yaml
+  
+  # User service monitoring
+  - user-service-source.yaml
+  
+  # Image automation
+  - image-automation.yaml
+  
+  # Application clusters (for application cluster Flux instances)
+  - application-clusters.yaml

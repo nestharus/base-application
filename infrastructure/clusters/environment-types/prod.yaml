@@ -1,0 +1,81 @@
+# Production Environment Type Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: environment-type-prod
+  namespace: flux-system
+data:
+  config.yaml: |
+    environmentType: prod
+    description: "Production environment for live workloads"
+    cluster:
+      enableHA: true
+      nodePools:
+        - name: general-restricted
+          enabled: true
+          nodeQuantity: 2
+          plan: vc2-2c-4gb
+          minNodes: 2
+          maxNodes: 4
+          labels:
+            node-type: general-restricted
+            workload: system
+          taints:
+            - key: node-type
+              value: general-restricted
+              effect: NoSchedule
+        - name: general-public
+          enabled: true
+          nodeQuantity: 3
+          plan: vc2-2c-4gb
+          minNodes: 3
+          maxNodes: 10
+          labels:
+            node-type: general-public
+            workload: application
+          taints: []
+        - name: memory
+          enabled: true
+          nodeQuantity: 0
+          plan: vc2-2c-16gb
+          minNodes: 1
+          maxNodes: 5
+          labels:
+            node-type: memory
+            workload: memory-intensive
+          taints:
+            - key: node-type
+              value: memory
+              effect: NoSchedule
+        - name: storage
+          enabled: true
+          nodeQuantity: 0
+          plan: vhp-2c-4gb-intel
+          minNodes: 1
+          maxNodes: 3
+          labels:
+            node-type: storage
+            workload: storage-intensive
+          taints:
+            - key: node-type
+              value: storage
+              effect: NoSchedule
+        - name: ai
+          enabled: true
+          nodeQuantity: 0
+          plan: vgpu-a40-4c-24gb-1g
+          minNodes: 0
+          maxNodes: 2
+          labels:
+            node-type: ai
+            workload: gpu
+            gpu: nvidia-a40
+          taints:
+            - key: nvidia.com/gpu
+              value: "true"
+              effect: NoSchedule
+    features:
+      autoScaling: conservative
+      monitoring: advanced
+      backup: enabled
+      costOptimization: low

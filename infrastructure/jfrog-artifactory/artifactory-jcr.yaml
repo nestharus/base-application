@@ -1,0 +1,132 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: artifactory-jcr
+  namespace: jfrog-artifactory
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: artifactory-jcr
+      version: 7.117.10
+      sourceRef:
+        kind: HelmRepository
+        name: jfrog
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Platform cluster configuration
+    nodeSelector:
+      cluster-type: platform
+    priorityClassName: platform-critical
+    
+    # PostgreSQL settings
+    postgresql:
+      enabled: true
+      postgresqlPassword: artifactory123
+      persistence:
+        size: 50Gi
+        storageClass: vultr-block-storage
+      nodeSelector:
+        cluster-type: platform
+    
+    # Artifactory settings
+    artifactory:
+      artifactory:
+        image:
+          registry: releases-docker.jfrog.io
+          repository: jfrog/artifactory-jcr
+          tag: 7.117.10
+        
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        
+        persistence:
+          enabled: true
+          size: 100Gi
+          storageClass: vultr-block-storage
+        
+        javaOpts:
+          xms: "1g"
+          xmx: "3g"
+        
+        # License key should be provided via secret
+        license:
+          secret: artifactory-license
+          dataKey: license
+      
+      nginx:
+        enabled: true
+        service:
+          type: LoadBalancer
+          annotations:
+            service.beta.kubernetes.io/vultr-loadbalancer-protocol: "tcp"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+    
+    # Service account
+    serviceAccount:
+      create: true
+      name: artifactory-jcr
+    
+    # Ingress configuration
+    ingress:
+      enabled: false  # We're using LoadBalancer service type
+    
+    # Repository configuration
+    customInitContainersBegin: |
+      - name: "create-default-repos"
+        image: "releases-docker.jfrog.io/jfrog/artifactory-jcr:7.117.10"
+        command:
+          - 'sh'
+          - '-c'
+          - |
+            echo "Waiting for Artifactory to be ready..."
+            until curl -f -u admin:password http://localhost:8082/artifactory/api/system/ping; do
+              sleep 5
+            done
+            echo "Creating Docker repository..."
+            curl -u admin:password -X PUT \
+              -H "Content-Type: application/json" \
+              -d '{
+                "key": "docker-local",
+                "rclass": "local",
+                "packageType": "docker",
+                "dockerApiVersion": "V2"
+              }' \
+              http://localhost:8082/artifactory/api/repositories/docker-local
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: artifactory-license
+  namespace: jfrog-artifactory
+type: Opaque
+stringData:
+  license: |
+    # Add your JFrog Artifactory JCR license here
+    # This should be obtained from JFrog
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: jfrog
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.jfrog.io

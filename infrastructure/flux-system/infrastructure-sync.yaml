@@ -1,0 +1,56 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: infrastructure
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/nestharus/base-application.git
+  ref:
+    branch: main
+  ignore: |
+    # Ignore everything except infrastructure
+    /*
+    !/infrastructure/
+    # But ignore terraform state files
+    infrastructure/*.tfstate
+    infrastructure/*.tfstate.*
+    infrastructure/.terraform/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infrastructure
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: "./infrastructure"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infrastructure
+  validation: client
+  healthChecks:
+    - apiVersion: v1
+      kind: Namespace
+      name: kong
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kong
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: "./infrastructure/kong"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infrastructure
+  dependsOn:
+    - name: infrastructure
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kong-kong
+      namespace: kong

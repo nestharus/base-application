@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flux-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    infisical.io/enabled: "true"
+  annotations:
+    infisical.io/environment: ${ENVIRONMENT_NAME}
+    infisical.io/environment-type: ${ENVIRONMENT_TYPE}
+---
+# Infisical token secret will be synced from platform cluster
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: infisical-secret-store
+  namespace: flux-system
+spec:
+  provider:
+    infisical:
+      auth:
+        universalAuthCredentials:
+          clientId:
+            key: INFISICAL_UNIVERSAL_AUTH_CLIENT_ID
+            name: ${ENVIRONMENT_NAME}-flux-token
+          clientSecret:
+            key: INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
+            name: ${ENVIRONMENT_NAME}-flux-token
+      projectId: ${ENVIRONMENT_NAME}
+      environmentSlug: ${ENVIRONMENT_TYPE}
+      secretsScope:
+        secretsPath: /
+        recursive: true
+      hostAPI: http://infisical.infisical.svc.cluster.local:8080
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m
+  ref:
+    branch: main
+  secretRef:
+    name: flux-system
+  url: ssh://git@github.com/your-org/your-repo
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  postBuild:
+    substitute:
+      environment: ${ENVIRONMENT_NAME}
+      environment_type: ${ENVIRONMENT_TYPE}
+      cluster_type: application

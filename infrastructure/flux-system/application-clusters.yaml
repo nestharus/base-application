@@ -1,0 +1,34 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: application-clusters
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/clusters
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  healthChecks:
+    - apiVersion: infrastructure.base.io/v1alpha1
+      kind: KubernetesCluster
+      name: dev-cluster
+      namespace: flux-system
+    - apiVersion: infrastructure.base.io/v1alpha1
+      kind: KubernetesCluster
+      name: staging-cluster
+      namespace: flux-system
+    - apiVersion: infrastructure.base.io/v1alpha1
+      kind: KubernetesCluster
+      name: prod-cluster
+      namespace: flux-system
+    - apiVersion: infrastructure.base.io/v1alpha1
+      kind: KubernetesCluster
+      name: sue-cluster
+      namespace: flux-system
+  postBuild:
+    substitute:
+      cluster_name: "base-k8s"
+      kubernetes_version: "v1.29.4+1"
+      vultr_region: "ewr"

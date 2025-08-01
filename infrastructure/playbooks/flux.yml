@@ -1,0 +1,107 @@
+---
+- name: Deploy Flux using Helm
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Add FluxCD Helm repo
+      community.kubernetes.helm_repository:
+        name: fluxcd
+        repo_url: "https://fluxcd-community.github.io/helm-charts"
+
+    - name: Install Flux
+      community.kubernetes.helm:
+        name: flux2
+        chart_ref: fluxcd/flux2
+        release_namespace: flux-system
+        create_namespace: true
+        wait: true
+        values:
+          # Configure Flux controllers
+          controllers:
+            helm:
+              resources:
+                limits:
+                  cpu: 200m
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+            source:
+              resources:
+                limits:
+                  cpu: 200m
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+            kustomize:
+              resources:
+                limits:
+                  cpu: 200m
+                  memory: 512Mi
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+            notification:
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 256Mi
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+          # Enable monitoring
+          prometheus:
+            enabled: true
+          # Node affinity for general-restricted nodes
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values:
+                    - general-restricted
+          # Tolerations for general-restricted node taints
+          tolerations:
+          - key: node-type
+            operator: Equal
+            value: general-restricted
+            effect: NoSchedule
+          # Priority class for system components
+          priorityClassName: system-critical
+            
+    - name: Wait for Flux pods to be ready
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: flux-system
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Install Flux CLI
+      shell: |
+        curl -s https://fluxcd.io/install.sh | bash
+      args:
+        creates: /usr/local/bin/flux
+        
+    - name: Verify Flux installation
+      shell: flux version --client
+      register: flux_version
+      
+    - name: Display Flux version
+      debug:
+        msg: "Flux installed: {{ flux_version.stdout }}"
+        
+    - name: Check Flux components status
+      shell: flux check
+      register: flux_check
+      ignore_errors: true
+      
+    - name: Display Flux status
+      debug:
+        msg: "{{ flux_check.stdout }}"

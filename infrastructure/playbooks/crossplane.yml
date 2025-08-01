@@ -1,0 +1,80 @@
+---
+- name: Deploy Crossplane using Helm
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Add Crossplane Helm repo
+      community.kubernetes.helm_repository:
+        name: crossplane-stable
+        repo_url: "https://charts.crossplane.io/stable"
+
+    - name: Install Crossplane
+      community.kubernetes.helm:
+        name: crossplane
+        chart_ref: crossplane-stable/crossplane
+        release_namespace: crossplane-system
+        create_namespace: true
+        wait: true
+        values:
+          # Enable metrics for monitoring
+          metrics:
+            enabled: true
+          # Configure resource limits
+          resourcesCrossplane:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          resourcesRBACManager:
+            limits:
+              cpu: 100m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          # Node affinity for general-restricted nodes
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values:
+                    - general-restricted
+          # Tolerations for general-restricted node taints
+          tolerations:
+          - key: node-type
+            operator: Equal
+            value: general-restricted
+            effect: NoSchedule
+          # Priority class for system components
+          priorityClassName: system-critical
+              
+    - name: Wait for Crossplane pods to be ready
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: crossplane-system
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Install Crossplane CLI
+      shell: |
+        curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh
+        sudo mv kubectl-crossplane /usr/local/bin
+      args:
+        creates: /usr/local/bin/kubectl-crossplane
+        
+    - name: Verify Crossplane installation
+      shell: kubectl crossplane version
+      register: crossplane_version
+      
+    - name: Display Crossplane version
+      debug:
+        msg: "Crossplane installed: {{ crossplane_version.stdout }}"

@@ -1,0 +1,35 @@
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-vultr
+spec:
+  package: crossplane/provider-vultr:v0.3.0
+  controllerConfigRef:
+    name: vultr-config
+---
+apiVersion: pkg.crossplane.io/v1alpha1
+kind: ControllerConfig
+metadata:
+  name: vultr-config
+spec:
+  args:
+    - --debug
+  env:
+    - name: VULTR_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: vultr-credentials
+          namespace: crossplane-system
+          key: api-key
+---
+apiVersion: vultr.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      name: vultr-credentials
+      namespace: crossplane-system
+      key: api-key

@@ -1,0 +1,124 @@
+---
+- name: Configure Platform Kubernetes cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: Ensure kubectl is available
+      shell: kubectl version --client
+      register: kubectl_check
+      failed_when: kubectl_check.rc != 0
+      
+    - name: Create priority classes for platform services
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: "{{ item.name }}"
+          value: "{{ item.value }}"
+          globalDefault: "{{ item.default | default(false) }}"
+          description: "{{ item.description }}"
+      loop:
+        - name: platform-critical
+          value: 2000000000
+          description: "Critical platform components (JCR, Infisical)"
+        - name: platform-high
+          value: 1000000
+          description: "High priority platform workloads"
+        - name: platform-medium
+          value: 100
+          default: true
+          description: "Default priority for platform workloads"
+          
+    - name: Create storage classes for platform services
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: vultr-block-storage-retain
+          provisioner: block.csi.vultr.com
+          reclaimPolicy: Retain
+          volumeBindingMode: WaitForFirstConsumer
+          allowVolumeExpansion: true
+          
+    - name: Configure RBAC for cross-namespace access
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: platform-services-reader
+          rules:
+          - apiGroups: [""]
+            resources: ["services", "endpoints"]
+            verbs: ["get", "list", "watch"]
+          - apiGroups: [""]
+            resources: ["secrets"]
+            verbs: ["get", "list"]
+            resourceNames: ["jcr-registry-secret", "infisical-api-token"]
+            
+    - name: Create network policies for platform services
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: allow-cross-vpc
+            namespace: "{{ item }}"
+          spec:
+            podSelector: {}
+            policyTypes:
+            - Ingress
+            - Egress
+            ingress:
+            # Allow from application cluster VPC
+            - from:
+              - ipBlock:
+                  cidr: 10.0.0.0/24
+            # Allow from within platform VPC
+            - from:
+              - ipBlock:
+                  cidr: 10.1.0.0/24
+            egress:
+            # Allow all egress
+            - {}
+      loop:
+        - jfrog-artifactory
+        - infisical
+        
+    - name: Create resource quotas for platform namespaces
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ResourceQuota
+          metadata:
+            name: platform-quota
+            namespace: "{{ item.namespace }}"
+          spec:
+            hard:
+              requests.cpu: "{{ item.cpu }}"
+              requests.memory: "{{ item.memory }}"
+              limits.cpu: "{{ item.cpu_limit }}"
+              limits.memory: "{{ item.memory_limit }}"
+              persistentvolumeclaims: "{{ item.pvc }}"
+      loop:
+        - namespace: jfrog-artifactory
+          cpu: "4"
+          memory: "8Gi"
+          cpu_limit: "8"
+          memory_limit: "16Gi"
+          pvc: "10"
+        - namespace: infisical
+          cpu: "2"
+          memory: "4Gi"
+          cpu_limit: "4"
+          memory_limit: "8Gi"
+          pvc: "5"

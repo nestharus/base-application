@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: infisical
+
+resources:
+  - namespace.yaml
+  - infisical-helm-release.yaml
+  - ansible-configurator.yaml
+  - machine-token-config.yaml
+  - token-provisioner.yaml
+  - secret-propagation.yaml
+  - service-token-operator.yaml
+
+# Generate ConfigMaps from files
+configMapGenerator:
+  - name: ansible-playbooks-cm
+    files:
+      - main.yml=playbooks/main.yml
+      - infisical_bootstrap.yml=playbooks/infisical_bootstrap.yml
+      - infisical_secrets_sync.yml=playbooks/infisical_secrets_sync.yml
+    options:
+      disableNameSuffixHash: true
+
+commonLabels:
+  app.kubernetes.io/name: infisical
+  app.kubernetes.io/part-of: base-application
+  app.kubernetes.io/managed-by: flux

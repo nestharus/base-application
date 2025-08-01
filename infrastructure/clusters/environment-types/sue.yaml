@@ -1,0 +1,54 @@
+# SUE (System Under Evaluation) Environment Type Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: environment-type-sue
+  namespace: flux-system
+data:
+  config.yaml: |
+    environmentType: sue
+    description: "System Under Evaluation environment for experimentation"
+    cluster:
+      enableHA: false
+      nodePools:
+        - name: general-restricted
+          enabled: true
+          nodeQuantity: 1
+          plan: vc2-2c-4gb
+          minNodes: 1
+          maxNodes: 2
+          labels:
+            node-type: general-restricted
+            workload: system
+          taints:
+            - key: node-type
+              value: general-restricted
+              effect: NoSchedule
+        - name: general-public
+          enabled: true
+          nodeQuantity: 1
+          plan: vc2-2c-4gb
+          minNodes: 1
+          maxNodes: 2
+          labels:
+            node-type: general-public
+            workload: application
+          taints: []
+        - name: spot
+          enabled: true
+          nodeQuantity: 0
+          plan: vc2-4c-8gb
+          minNodes: 0
+          maxNodes: 3
+          labels:
+            node-type: spot
+            workload: evaluation
+          taints:
+            - key: node-type
+              value: spot
+              effect: NoSchedule
+    features:
+      autoScaling: aggressive
+      monitoring: minimal
+      backup: disabled
+      costOptimization: maximum

@@ -1,0 +1,49 @@
+# Example: Development environment for Team 1
+apiVersion: infrastructure.base.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: dev-team1-cluster
+  namespace: flux-system
+  labels:
+    environment: dev-team1
+    environment-type: dev
+    team: team1
+spec:
+  parameters:
+    region: ewr
+    version: v1.29.4+1
+    clusterType: application
+    environmentName: dev-team1
+    environmentType: dev
+  compositionRef:
+    name: xkubernetesclusters.vultr.infrastructure.base.io
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: dev-team1-cluster-bootstrap
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: application-clusters
+  interval: 10m
+  path: ./infrastructure/clusters/bootstrap
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  kubeConfig:
+    secretRef:
+      name: dev-team1-cluster-kubeconfig
+  targetNamespace: flux-system
+  postBuild:
+    substitute:
+      ENVIRONMENT_NAME: dev-team1
+      ENVIRONMENT_TYPE: dev
+    substituteFrom:
+      - kind: Secret
+        name: dev-team1-flux-token
+        optional: true
+      - kind: ConfigMap
+        name: environment-type-dev
+        optional: false

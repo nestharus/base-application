@@ -1,0 +1,68 @@
+---
+# Container-adapted platform setup playbook
+# This runs services as Docker containers instead of Kubernetes deployments
+
+- name: Setup Platform Services in Containers
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    deployment_mode: "{{ deployment_mode | default('kubernetes') }}"
+    target_host: "{{ target_host | default('localhost') }}"
+    
+  tasks:
+    - name: Container deployment notice
+      debug:
+        msg: "Running in container mode - services will be deployed as Docker containers"
+      when: deployment_mode == "container"
+
+    - name: Create platform network
+      docker_network:
+        name: platform-network
+      when: deployment_mode == "container"
+
+    - name: Deploy PostgreSQL for platform services
+      docker_container:
+        name: platform-postgres
+        image: postgres:15
+        state: started
+        networks:
+          - name: platform-network
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform123
+          POSTGRES_DB: platform
+      when: deployment_mode == "container"
+      delegate_to: "{{ target_host }}"
+
+    - name: Deploy Redis for platform services
+      docker_container:
+        name: platform-redis
+        image: redis:7-alpine
+        state: started
+        networks:
+          - name: platform-network
+      when: deployment_mode == "container"
+      delegate_to: "{{ target_host }}"
+
+    - name: Create data directories
+      file:
+        path: "/data/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - infisical
+        - artifactory
+        - postgres
+        - redis
+      when: deployment_mode == "container"
+
+    - name: Configure platform services integration
+      copy:
+        content: |
+          # Platform services configuration
+          INFISICAL_URL=http://infisical:8080
+          ARTIFACTORY_URL=http://artifactory:8081
+          POSTGRES_HOST=platform-postgres
+          REDIS_HOST=platform-redis
+        dest: /data/platform.env
+      when: deployment_mode == "container"

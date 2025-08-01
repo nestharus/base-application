@@ -1,0 +1,72 @@
+---
+# Container-adapted environment setup playbook
+# Sets up environment-specific services as Docker containers
+
+- name: Setup Environment Services in Containers
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    deployment_mode: "{{ deployment_mode | default('kubernetes') }}"
+    target_host: "{{ target_host | default('localhost') }}"
+    environment_name: "{{ environment_name | default('dev-local') }}"
+    environment_type: "{{ environment_type | default('dev') }}"
+    
+  tasks:
+    - name: Load environment type configuration
+      set_fact:
+        env_config: "{{ lookup('file', '../clusters/environment-types/' + environment_type + '.yaml') | from_yaml }}"
+      when: deployment_mode == "container"
+
+    - name: Create environment network
+      docker_network:
+        name: "{{ environment_name }}-network"
+      when: deployment_mode == "container"
+
+    - name: Deploy PostgreSQL for environment
+      docker_container:
+        name: "{{ environment_name }}-postgres"
+        image: postgres:15
+        state: started
+        networks:
+          - name: "{{ environment_name }}-network"
+        env:
+          POSTGRES_USER: "{{ environment_name }}"
+          POSTGRES_PASSWORD: "{{ environment_name }}123"
+          POSTGRES_DB: "{{ environment_name }}"
+      when: deployment_mode == "container"
+      delegate_to: "{{ target_host }}"
+
+    - name: Deploy monitoring stack
+      include_tasks: container-monitoring.yml
+      when: 
+        - deployment_mode == "container"
+        - environment_type in ['staging', 'prod']
+
+    - name: Configure environment services
+      copy:
+        content: |
+          # Environment configuration
+          ENVIRONMENT_NAME={{ environment_name }}
+          ENVIRONMENT_TYPE={{ environment_type }}
+          KONG_PG_HOST={{ environment_name }}-postgres
+          KONG_PG_DATABASE={{ environment_name }}
+          KONG_PG_USER={{ environment_name }}
+          KONG_PG_PASSWORD={{ environment_name }}123
+          
+          # Platform services URLs (cross-container communication)
+          INFISICAL_URL=http://platform:8080
+          ARTIFACTORY_URL=http://platform:8081
+        dest: "/data/{{ environment_name }}.env"
+      when: deployment_mode == "container"
+
+    - name: Create environment data directories
+      file:
+        path: "/data/{{ environment_name }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - kong
+        - postgres
+        - logs
+        - configs
+      when: deployment_mode == "container"

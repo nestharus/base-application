@@ -1,0 +1,54 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: platform-infrastructure
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/nestharus/base-application.git
+  ref:
+    branch: main
+  ignore: |
+    /*
+    !/infrastructure/infisical/
+    !/infrastructure/jfrog-artifactory/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infisical
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: "./infrastructure/infisical"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: platform-infrastructure
+  targetNamespace: infisical
+  validation: client
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: infisical
+      namespace: infisical
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: jfrog-artifactory
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: "./infrastructure/jfrog-artifactory"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: platform-infrastructure
+  targetNamespace: jfrog-artifactory
+  validation: client
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: artifactory-jcr
+      namespace: jfrog-artifactory

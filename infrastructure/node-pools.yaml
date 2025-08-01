@@ -1,0 +1,22 @@
+# Node Pools Configuration - DEPRECATED
+# This file is kept for reference only. Node pools are now statically defined in main.tf
+# Services should use node selectors and tolerations to target specific node types.
+
+# Available node types:
+# - general-restricted: For Kubernetes system components (1-2 nodes)
+# - general-public: For standard application workloads like user-service (1 node)
+# - memory: For memory-intensive workloads (0-5 nodes, scales from zero)
+# - storage: For storage-intensive workloads with NVMe (0-3 nodes, scales from zero)
+# - spot: For batch/non-critical workloads (0-10 nodes, scales from zero)
+# - ai: For GPU workloads (0-2 nodes, scales from zero)
+
+# Example node selector for services:
+# nodeSelector:
+#   node-type: general-public
+#
+# For specialized node types, also add tolerations:
+# tolerations:
+# - key: node-type
+#   operator: Equal
+#   value: memory
+#   effect: NoSchedule

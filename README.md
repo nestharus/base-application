@@ -1,1 +1,2 @@
 Need to get configuration up from environment variables AND flagsmith AND infisical
+Need to get flux to watch S3 buckets for SUE environment deployments. The files will be json files with dict { artifact name, artifact tag, user, creation date, expiration date, environment name, environment type }

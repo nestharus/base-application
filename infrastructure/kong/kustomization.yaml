@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kong
+
+resources:
+  - namespace.yaml
+  - kong-helm-release.yaml
+  - kong-services.yaml
+  - kong-config-job.yaml
+
+commonLabels:
+  app.kubernetes.io/name: kong
+  app.kubernetes.io/part-of: base-application
+  app.kubernetes.io/managed-by: flux
+
+patches:
+  # Ensure Kong runs on general-public nodes
+  - target:
+      kind: HelmRelease
+      name: kong
+    patch: |-
+      - op: add
+        path: /spec/values/affinity
+        value:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                    - kong
+                topologyKey: kubernetes.io/hostname

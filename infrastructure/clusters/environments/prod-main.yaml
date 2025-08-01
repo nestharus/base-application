@@ -1,0 +1,49 @@
+# Example: Production environment for main application
+apiVersion: infrastructure.base.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: prod-main-cluster
+  namespace: flux-system
+  labels:
+    environment: prod-main
+    environment-type: prod
+    purpose: main-application
+spec:
+  parameters:
+    region: ewr
+    version: v1.29.4+1
+    clusterType: application
+    environmentName: prod-main
+    environmentType: prod
+  compositionRef:
+    name: xkubernetesclusters.vultr.infrastructure.base.io
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prod-main-cluster-bootstrap
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: application-clusters
+  interval: 10m
+  path: ./infrastructure/clusters/bootstrap
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  kubeConfig:
+    secretRef:
+      name: prod-main-cluster-kubeconfig
+  targetNamespace: flux-system
+  postBuild:
+    substitute:
+      ENVIRONMENT_NAME: prod-main
+      ENVIRONMENT_TYPE: prod
+    substituteFrom:
+      - kind: Secret
+        name: prod-main-flux-token
+        optional: true
+      - kind: ConfigMap
+        name: environment-type-prod
+        optional: false

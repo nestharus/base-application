@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-config-script
+  namespace: kong
+data:
+  configure-kong.sh: |
+    #!/bin/bash
+    set -e
+    
+    KONG_ADMIN_URL="http://kong-kong-admin:8001"
+    
+    echo "Waiting for Kong Admin API to be ready..."
+    until curl -f ${KONG_ADMIN_URL}/status; do
+      echo "Kong Admin API not ready yet..."
+      sleep 5
+    done
+    
+    echo "Kong Admin API is ready!"
+    
+    # Create a default workspace (if using Kong Enterprise)
+    # curl -X POST ${KONG_ADMIN_URL}/workspaces \
+    #   -H "Content-Type: application/json" \
+    #   -d '{"name": "default"}'
+    
+    # Create service for user-service
+    echo "Creating user-service upstream..."
+    curl -X POST ${KONG_ADMIN_URL}/upstreams \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "user-service.upstream",
+        "algorithm": "round-robin",
+        "healthchecks": {
+          "active": {
+            "type": "http",
+            "http_path": "/health/ready",
+            "healthy": {
+              "interval": 10,
+              "successes": 2
+            },
+            "unhealthy": {
+              "interval": 5,
+              "http_failures": 5
+            }
+          }
+        }
+      }'
+    
+    # Add targets to upstream
+    echo "Adding user-service targets..."
+    curl -X POST ${KONG_ADMIN_URL}/upstreams/user-service.upstream/targets \
+      -H "Content-Type: application/json" \
+      -d '{
+        "target": "user-service.user-service.svc.cluster.local:80",
+        "weight": 100
+      }'
+    
+    # Create service
+    echo "Creating user-service..."
+    curl -X POST ${KONG_ADMIN_URL}/services \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "user-service",
+        "host": "user-service.upstream",
+        "port": 80,
+        "protocol": "http",
+        "connect_timeout": 60000,
+        "write_timeout": 60000,
+        "read_timeout": 60000
+      }'
+    
+    # Create route
+    echo "Creating user-service route..."
+    curl -X POST ${KONG_ADMIN_URL}/services/user-service/routes \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "user-service-route",
+        "paths": ["/api/v1/users"],
+        "strip_path": true,
+        "preserve_host": true,
+        "protocols": ["http", "https"]
+      }'
+    
+    # Enable plugins globally
+    echo "Enabling global plugins..."
+    
+    # Rate limiting
+    curl -X POST ${KONG_ADMIN_URL}/plugins \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "rate-limiting",
+        "config": {
+          "minute": 1000,
+          "hour": 100000,
+          "policy": "local"
+        }
+      }'
+    
+    # Prometheus metrics
+    curl -X POST ${KONG_ADMIN_URL}/plugins \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "prometheus",
+        "config": {
+          "status_code_metrics": true,
+          "latency_metrics": true,
+          "bandwidth_metrics": true,
+          "upstream_health_metrics": true
+        }
+      }'
+    
+    echo "Kong configuration completed!"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kong-config-job
+  namespace: kong
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: kong-config
+        image: curlimages/curl:8.5.0
+        command: ["/bin/sh"]
+        args: ["/scripts/configure-kong.sh"]
+        volumeMounts:
+        - name: config-script
+          mountPath: /scripts
+      volumes:
+      - name: config-script
+        configMap:
+          name: kong-config-script
+          defaultMode: 0755

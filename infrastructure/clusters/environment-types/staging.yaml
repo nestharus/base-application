@@ -1,0 +1,54 @@
+# Staging Environment Type Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: environment-type-staging
+  namespace: flux-system
+data:
+  config.yaml: |
+    environmentType: staging
+    description: "Pre-production environment for testing"
+    cluster:
+      enableHA: true
+      nodePools:
+        - name: general-restricted
+          enabled: true
+          nodeQuantity: 1
+          plan: vc2-2c-4gb
+          minNodes: 1
+          maxNodes: 2
+          labels:
+            node-type: general-restricted
+            workload: system
+          taints:
+            - key: node-type
+              value: general-restricted
+              effect: NoSchedule
+        - name: general-public
+          enabled: true
+          nodeQuantity: 2
+          plan: vc2-2c-4gb
+          minNodes: 2
+          maxNodes: 4
+          labels:
+            node-type: general-public
+            workload: application
+          taints: []
+        - name: memory
+          enabled: true
+          nodeQuantity: 0
+          plan: vc2-2c-16gb
+          minNodes: 0
+          maxNodes: 2
+          labels:
+            node-type: memory
+            workload: memory-intensive
+          taints:
+            - key: node-type
+              value: memory
+              effect: NoSchedule
+    features:
+      autoScaling: moderate
+      monitoring: standard
+      backup: enabled
+      costOptimization: medium
