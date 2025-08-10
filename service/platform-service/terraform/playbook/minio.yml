@@ -1,0 +1,605 @@
+---
+- name: Deploy MinIO with Infisical Kubernetes Auth Integration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+    minio_namespace: minio-system
+    minio_version: "5.0.14"
+    storage_size: "{{ lookup('env', 'MINIO_STORAGE_SIZE') | default('10Gi') }}"
+    storage_class: "{{ lookup('env', 'MINIO_STORAGE_CLASS') | default('vultr-block-storage-hdd-retain') }}"
+    infisical_namespace: infisical
+    infisical_api_url: "http://infisical.infisical.svc.cluster.local:8080/api"
+    infisical_auth_method: "{{ lookup('env', 'INFISICAL_AUTH_METHOD') | default('kubernetes') }}"
+    
+  tasks:
+    - name: Ensure kubectl is configured
+      shell: kubectl cluster-info
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: cluster_info
+      failed_when: cluster_info.rc != 0
+      
+    - name: Create MinIO namespace with Infisical injection label
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ minio_namespace }}"
+            labels:
+              infisical.com/injection: "enabled"
+        
+    - name: Generate secure random credentials for MinIO
+      set_fact:
+        minio_root_user: "admin-{{ lookup('password', '/dev/null chars=ascii_lowercase,digits length=8') }}"
+        minio_root_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits,punctuation length=32') }}"
+      no_log: true
+      
+    - name: Create ServiceAccount for MinIO with Kubernetes auth
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: minio-sa
+            namespace: "{{ minio_namespace }}"
+            annotations:
+              infisical.com/identity-name: "minio-service"
+              infisical.com/environment: "production"
+              infisical.com/secret-path: "/platform/minio"
+              
+    - name: Bind MinIO ServiceAccount to auth delegator
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: minio-auth-delegator
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: system:auth-delegator
+          subjects:
+          - kind: ServiceAccount
+            name: minio-sa
+            namespace: "{{ minio_namespace }}"
+            
+    - name: Create ConfigMap with Infisical configuration for MinIO
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: minio-infisical-config
+            namespace: "{{ minio_namespace }}"
+          data:
+            identity-id: ""  # Will be populated by auth manager
+            project-id: "platform"
+            api-url: "{{ infisical_api_url }}"
+            environment: "production"
+            secret-path: "/platform/minio"
+            auth-method: "kubernetes"
+            
+    - name: Store MinIO credentials using Kubernetes auth
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: minio-credentials-init-{{ ansible_date_time.epoch }}
+            namespace: "{{ minio_namespace }}"
+          spec:
+            template:
+              spec:
+                serviceAccountName: minio-sa
+                restartPolicy: OnFailure
+                containers:
+                - name: init
+                  image: infisical/cli:latest
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -e
+                    echo "Initializing MinIO credentials with Infisical Kubernetes auth"
+                    
+                    # Get service account token
+                    SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                    
+                    # Authenticate with Infisical
+                    AUTH_RESPONSE=$(curl -s -X POST "${INFISICAL_API_URL}/v1/auth/kubernetes/login" \
+                      -H "Content-Type: application/json" \
+                      -d "{
+                        \"identityId\": \"${INFISICAL_IDENTITY_ID}\",
+                        \"serviceAccountToken\": \"$SA_TOKEN\"
+                      }")
+                    
+                    ACCESS_TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.accessToken')
+                    
+                    if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+                      echo "Failed to authenticate with Infisical"
+                      exit 1
+                    fi
+                    
+                    # Store credentials in Infisical
+                    curl -X POST "${INFISICAL_API_URL}/v3/secrets/batch/raw" \
+                      -H "Authorization: Bearer $ACCESS_TOKEN" \
+                      -H "Content-Type: application/json" \
+                      -d "{
+                        \"workspaceId\": \"${INFISICAL_PROJECT_ID}\",
+                        \"environment\": \"production\",
+                        \"secretPath\": \"/platform/minio\",
+                        \"secrets\":
+            - secretKey: "MINIO_ROOT_USER"
+              secretValue: "{{ minio_root_user }}"
+              secretComment: "MinIO root username"
+            - secretKey: "MINIO_ROOT_PASSWORD"
+              secretValue: "{{ minio_root_password }}"
+              secretComment: "MinIO root password"
+            - secretKey: "MINIO_ENDPOINT"
+              secretValue: "minio.{{ minio_namespace }}.svc.cluster.local:9000"
+              secretComment: "MinIO API endpoint"
+            - secretKey: "MINIO_CONSOLE"
+              secretValue: "minio.{{ minio_namespace }}.svc.cluster.local:9001"
+              secretComment: "MinIO console endpoint"
+      register: infisical_store
+      no_log: true
+      
+    - name: Create MinIO service token in Infisical
+      uri:
+        url: "{{ infisical_api_url }}/v1/workspace/{{ lookup('env', 'INFISICAL_PROJECT_ID') }}/service-token"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'INFISICAL_MACHINE_TOKEN') }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "minio-service-token"
+          environment: "production"
+          secretPath: "/minio"
+          permissions:
+            - environment: "production"
+              permission: "read"
+              secretPath: "/minio"
+      register: minio_service_token
+      no_log: true
+      
+    - name: Store MinIO service token in Kubernetes secret
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: minio-infisical-token
+            namespace: "{{ minio_namespace }}"
+          type: Opaque
+          stringData:
+            token: "{{ minio_service_token.json.serviceToken }}"
+      no_log: true
+        
+    - name: Create Crossplane Composition for MinIO Volume
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: apiextensions.crossplane.io/v1
+          kind: Composition
+          metadata:
+            name: minio-volume-composition
+            labels:
+              crossplane.io/xrd: xminiovolumes.storage.platform.io
+          spec:
+            compositeTypeRef:
+              apiVersion: storage.platform.io/v1alpha1
+              kind: XMinioVolume
+            resources:
+            - name: persistent-volume-claim
+              base:
+                apiVersion: v1
+                kind: PersistentVolumeClaim
+                spec:
+                  accessModes:
+                  - ReadWriteOnce
+                  storageClassName: "{{ storage_class }}"
+                  resources:
+                    requests:
+                      storage: "{{ storage_size }}"
+              patches:
+              - fromFieldPath: "spec.storageSize"
+                toFieldPath: "spec.resources.requests.storage"
+              - fromFieldPath: "metadata.namespace"
+                toFieldPath: "metadata.namespace"
+              - fromFieldPath: "metadata.name"
+                toFieldPath: "metadata.name"
+                transforms:
+                - type: string
+                  string:
+                    fmt: "%s-pvc"
+                    
+    - name: Create Crossplane XRD for MinIO Volume
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: apiextensions.crossplane.io/v1
+          kind: CompositeResourceDefinition
+          metadata:
+            name: xminiovolumes.storage.platform.io
+          spec:
+            group: storage.platform.io
+            names:
+              kind: XMinioVolume
+              plural: xminiovolumes
+            claimNames:
+              kind: MinioVolume
+              plural: miniovolumes
+            versions:
+            - name: v1alpha1
+              served: true
+              referenceable: true
+              schema:
+                openAPIV3Schema:
+                  type: object
+                  properties:
+                    spec:
+                      type: object
+                      properties:
+                        storageSize:
+                          type: string
+                          default: "10Gi"
+                      required:
+                      - storageSize
+                      
+    - name: Wait for XRD to be established
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.crossplane.io/v1
+        kind: CompositeResourceDefinition
+        name: xminiovolumes.storage.platform.io
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_condition:
+          type: Established
+          status: "True"
+        wait_timeout: 60
+        
+    - name: Create MinIO Volume Claim via Crossplane
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: storage.platform.io/v1alpha1
+          kind: MinioVolume
+          metadata:
+            name: minio-storage
+            namespace: "{{ minio_namespace }}"
+          spec:
+            storageSize: "{{ storage_size }}"
+            
+    - name: Create MinIO Secret Sync CronJob
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: minio-secret-sync
+            namespace: "{{ minio_namespace }}"
+          spec:
+            schedule: "*/5 * * * *"  # Every 5 minutes
+            jobTemplate:
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: minio-secret-sync
+                    containers:
+                    - name: secret-sync
+                      image: infisical/cli:latest
+                      command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        # Fetch secrets from Infisical
+                        export INFISICAL_TOKEN=$(cat /var/run/secrets/infisical/token)
+                        
+                        # Get credentials from Infisical
+                        ROOT_USER=$(infisical secrets get MINIO_ROOT_USER --token=$INFISICAL_TOKEN --environment=production --path=/minio --plain)
+                        ROOT_PASSWORD=$(infisical secrets get MINIO_ROOT_PASSWORD --token=$INFISICAL_TOKEN --environment=production --path=/minio --plain)
+                        
+                        # Update Kubernetes secret
+                        kubectl create secret generic minio-credentials \
+                          --from-literal=root-user="$ROOT_USER" \
+                          --from-literal=root-password="$ROOT_PASSWORD" \
+                          --namespace={{ minio_namespace }} \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                      volumeMounts:
+                      - name: infisical-token
+                        mountPath: /var/run/secrets/infisical
+                        readOnly: true
+                    volumes:
+                    - name: infisical-token
+                      secret:
+                        secretName: minio-infisical-token
+                    restartPolicy: OnFailure
+                    
+    - name: Create ServiceAccount for secret sync
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: minio-secret-sync
+            namespace: "{{ minio_namespace }}"
+            
+    - name: Create Role for secret sync
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: Role
+          metadata:
+            name: minio-secret-sync
+            namespace: "{{ minio_namespace }}"
+          rules:
+          - apiGroups: [""]
+            resources: ["secrets"]
+            verbs: ["get", "list", "create", "update", "patch"]
+            
+    - name: Create RoleBinding for secret sync
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: minio-secret-sync
+            namespace: "{{ minio_namespace }}"
+          subjects:
+          - kind: ServiceAccount
+            name: minio-secret-sync
+            namespace: "{{ minio_namespace }}"
+          roleRef:
+            kind: Role
+            name: minio-secret-sync
+            apiGroup: rbac.authorization.k8s.io
+            
+    - name: Trigger initial secret sync
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: "minio-secret-sync-init-{{ ansible_date_time.epoch }}"
+            namespace: "{{ minio_namespace }}"
+          spec:
+            template:
+              spec:
+                serviceAccountName: minio-secret-sync
+                containers:
+                - name: secret-sync
+                  image: infisical/cli:latest
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Fetch secrets from Infisical
+                    export INFISICAL_TOKEN=$(cat /var/run/secrets/infisical/token)
+                    
+                    # Get credentials from Infisical
+                    ROOT_USER=$(infisical secrets get MINIO_ROOT_USER --token=$INFISICAL_TOKEN --environment=production --path=/minio --plain)
+                    ROOT_PASSWORD=$(infisical secrets get MINIO_ROOT_PASSWORD --token=$INFISICAL_TOKEN --environment=production --path=/minio --plain)
+                    
+                    # Create Kubernetes secret
+                    kubectl create secret generic minio-credentials \
+                      --from-literal=root-user="$ROOT_USER" \
+                      --from-literal=root-password="$ROOT_PASSWORD" \
+                      --namespace={{ minio_namespace }} \
+                      --dry-run=client -o yaml | kubectl apply -f -
+                  volumeMounts:
+                  - name: infisical-token
+                    mountPath: /var/run/secrets/infisical
+                    readOnly: true
+                volumes:
+                - name: infisical-token
+                  secret:
+                    secretName: minio-infisical-token
+                restartPolicy: Never
+            
+    - name: Add MinIO Helm repository
+      kubernetes.core.helm_repository:
+        name: minio
+        repo_url: "https://charts.min.io"
+        
+    - name: Install MinIO via Helm with secret reference
+      kubernetes.core.helm:
+        name: minio
+        chart_ref: minio/minio
+        release_namespace: "{{ minio_namespace }}"
+        create_namespace: true
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_timeout: 600
+        values:
+          replicas: 1
+          mode: standalone
+          
+          # Root user credentials from Kubernetes secret
+          existingSecret: "minio-credentials"
+          
+          # Persistence configuration - using Crossplane provisioned volume
+          persistence:
+            enabled: true
+            existingClaim: "minio-storage-pvc"
+            storageClass: "{{ storage_class }}"
+            accessMode: ReadWriteOnce
+            size: "{{ storage_size }}"
+            
+          # Service configuration
+          service:
+            type: ClusterIP
+            port: 9000
+            nodePort: null
+            
+          consoleService:
+            type: ClusterIP
+            port: 9001
+            nodePort: null
+            
+          # Resource configuration
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+              
+          # Node selector for system node pool
+          nodeSelector:
+            nodepool: system
+            
+          # Tolerations for system node pool
+          tolerations:
+          - key: "nodepool"
+            operator: "Equal"
+            value: "system"
+            effect: "NoSchedule"
+          - key: "node.kubernetes.io/not-ready"
+            operator: "Exists"
+            effect: "NoExecute"
+            tolerationSeconds: 300
+          - key: "node.kubernetes.io/unreachable"
+            operator: "Exists"
+            effect: "NoExecute"
+            tolerationSeconds: 300
+            
+          # Affinity for system node pool
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: nodepool
+                    operator: In
+                    values:
+                    - system
+                    
+          # Priority class for system components
+          priorityClassName: system-cluster-critical
+          
+          # Security context
+          securityContext:
+            enabled: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            
+          # Buckets to create on startup
+          buckets:
+          - name: platform-artifacts
+            policy: none
+            purge: false
+          - name: platform-backups
+            policy: none
+            purge: false
+          - name: application-data
+            policy: none
+            purge: false
+            
+          # Enable metrics
+          metrics:
+            serviceMonitor:
+              enabled: false
+              
+          # Add init container to wait for secret
+          extraInitContainers:
+          - name: wait-for-secret
+            image: bitnami/kubectl:latest
+            command:
+            - sh
+            - -c
+            - |
+              until kubectl get secret minio-credentials -n {{ minio_namespace }}; do
+                echo "Waiting for minio-credentials secret..."
+                sleep 5
+              done
+              
+    - name: Wait for MinIO deployment to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: minio
+        namespace: "{{ minio_namespace }}"
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Create MinIO Client ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: minio-client-config
+            namespace: "{{ minio_namespace }}"
+          data:
+            MINIO_ENDPOINT: "minio.{{ minio_namespace }}.svc.cluster.local:9000"
+            MINIO_CONSOLE: "minio.{{ minio_namespace }}.svc.cluster.local:9001"
+            MINIO_USE_SSL: "false"
+            INFISICAL_SECRET_PATH: "/minio"
+            INFISICAL_ENVIRONMENT: "production"
+            
+    - name: Verify MinIO installation
+      shell: kubectl get pods -n {{ minio_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: minio_pods
+      
+    - name: Display MinIO pods status
+      debug:
+        msg: "{{ minio_pods.stdout_lines }}"
+        
+    - name: Get MinIO service details
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: minio
+        namespace: "{{ minio_namespace }}"
+        kubeconfig: "{{ kubeconfig }}"
+      register: minio_service
+      
+    - name: Display MinIO access information
+      debug:
+        msg:
+          - "MinIO API Endpoint: minio.{{ minio_namespace }}.svc.cluster.local:9000"
+          - "MinIO Console: minio.{{ minio_namespace }}.svc.cluster.local:9001"
+          - "Credentials: Stored in Infisical at path /minio"
+          - "Secret sync: Automated every 5 minutes"
+          - "Buckets created: platform-artifacts, platform-backups, application-data"

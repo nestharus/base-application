@@ -1,0 +1,372 @@
+---
+- name: Deploy Flux to Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+    flux_namespace: flux-system
+    flux_version: "2.2.0"
+    
+  tasks:
+    - name: Ensure kubectl is configured
+      shell: kubectl cluster-info
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: cluster_info
+      failed_when: cluster_info.rc != 0
+      
+    - name: Create Flux namespace
+      kubernetes.core.k8s:
+        name: "{{ flux_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+        kubeconfig: "{{ kubeconfig }}"
+        
+    - name: Add FluxCD Helm repository
+      kubernetes.core.helm_repository:
+        name: fluxcd-community
+        repo_url: "https://fluxcd-community.github.io/helm-charts"
+        
+    - name: Install Flux via Helm
+      kubernetes.core.helm:
+        name: flux2
+        chart_ref: fluxcd-community/flux2
+        release_namespace: "{{ flux_namespace }}"
+        create_namespace: true
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_timeout: 600
+        values:
+          installCRDs: true
+          
+          # Controller configurations
+          helmController:
+            create: true
+            resources:
+              limits:
+                cpu: 200m
+                memory: 512Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          sourceController:
+            create: true
+            resources:
+              limits:
+                cpu: 200m
+                memory: 512Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          kustomizeController:
+            create: true
+            resources:
+              limits:
+                cpu: 200m
+                memory: 512Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          notificationController:
+            create: true
+            resources:
+              limits:
+                cpu: 100m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          imageAutomationController:
+            create: true
+            resources:
+              limits:
+                cpu: 100m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          imageReflectorController:
+            create: true
+            resources:
+              limits:
+                cpu: 100m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+            nodeSelector:
+              nodepool: system
+            tolerations:
+            - key: "nodepool"
+              operator: "Equal"
+              value: "system"
+              effect: "NoSchedule"
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: nodepool
+                      operator: In
+                      values:
+                      - system
+                      
+          # Enable monitoring
+          prometheus:
+            serviceMonitor:
+              create: true
+              
+          # Priority class for system components
+          priorityClassName: system-cluster-critical
+          
+          # Security settings
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10000
+            fsGroup: 10000
+            
+          podSecurityContext:
+            runAsNonRoot: true
+            runAsUser: 10000
+            fsGroup: 10000
+            
+    - name: Wait for Flux source-controller deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: source-controller
+        namespace: "{{ flux_namespace }}"
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Wait for Flux kustomize-controller deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: kustomize-controller
+        namespace: "{{ flux_namespace }}"
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Wait for Flux helm-controller deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: helm-controller
+        namespace: "{{ flux_namespace }}"
+        kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_condition:
+          type: Progressing
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Install Flux CLI
+      shell: |
+        if ! command -v flux &> /dev/null; then
+          curl -s https://fluxcd.io/install.sh | bash
+        fi
+      args:
+        creates: /usr/local/bin/flux
+        
+    - name: Verify Flux installation
+      shell: kubectl get pods -n {{ flux_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: flux_pods
+      
+    - name: Display Flux pods status
+      debug:
+        msg: "{{ flux_pods.stdout_lines }}"
+        
+    - name: Check Flux version
+      shell: flux version --client
+      register: flux_version
+      ignore_errors: true
+      
+    - name: Display Flux client version
+      debug:
+        msg: "{{ flux_version.stdout_lines | default(['Flux CLI not installed']) }}"
+        
+    - name: Run Flux check
+      shell: flux check
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: flux_check
+      ignore_errors: true
+      
+    - name: Display Flux status
+      debug:
+        msg: "{{ flux_check.stdout_lines | default(['Flux check failed']) }}"
+        
+    - name: Configure Flux with Infisical Kubernetes Auth
+      block:
+        - name: Create ServiceAccount for Flux
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: flux-infisical-sa
+                namespace: "{{ flux_namespace }}"
+                annotations:
+                  infisical.com/identity-name: "flux-system"
+                  infisical.com/environment: "production"
+                  infisical.com/secret-path: "/platform/flux"
+                  
+        - name: Bind Flux ServiceAccount to auth delegator
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ kubeconfig }}"
+            definition:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRoleBinding
+              metadata:
+                name: flux-infisical-auth-delegator
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: ClusterRole
+                name: system:auth-delegator
+              subjects:
+              - kind: ServiceAccount
+                name: flux-infisical-sa
+                namespace: "{{ flux_namespace }}"
+                
+        - name: Create ConfigMap with Infisical configuration for Flux
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ kubeconfig }}"
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: flux-infisical-config
+                namespace: "{{ flux_namespace }}"
+              data:
+                identity-id: ""  # Will be populated by auth manager
+                project-id: "platform"
+                api-url: "http://infisical.{{ flux_namespace }}.svc.cluster.local:8080/api"
+                environment: "production"
+                secret-path: "/platform/flux"
+                auth-method: "kubernetes"
+                
+        - name: Patch Flux deployments to use Kubernetes auth
+          kubernetes.core.k8s:
+            state: present
+            kubeconfig: "{{ kubeconfig }}"
+            merge_type: strategic
+            definition:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: "{{ item }}"
+                namespace: "{{ flux_namespace }}"
+              spec:
+                template:
+                  spec:
+                    serviceAccountName: flux-infisical-sa
+          loop:
+            - source-controller
+            - kustomize-controller
+            - helm-controller
+            - notification-controller
+          ignore_errors: true
+      when: lookup('env', 'INFISICAL_AUTH_METHOD') | default('kubernetes') == 'kubernetes'

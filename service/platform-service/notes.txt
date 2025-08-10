@@ -1,0 +1,2 @@
+How do I change task scaling in flink to respond to backpressure automatically? Suppose two tasks A and B. A needs another instance. B is quiet. Pool is 2 resources .
+

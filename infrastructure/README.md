@@ -1,3 +1,9 @@
+Slowly moving into platform-service with fixes
+
+
+
+
+
 # Infrastructure as Code
 
 This directory contains the Infrastructure as Code (IaC) configuration for the base application platform using Crossplane and Flux.

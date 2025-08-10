@@ -1,0 +1,129 @@
+---
+- name: Configure Kubernetes Cluster with kubernetes-ansible
+  hosts: kubernetes_cluster
+  gather_facts: yes
+  vars:
+    kubeconfig: "{{ lookup('env', 'KUBECONFIG') }}"
+    
+  tasks:
+    - name: Verify kubeconfig exists
+      stat:
+        path: "{{ kubeconfig }}"
+      register: kubeconfig_file
+      
+    - name: Fail if kubeconfig not found
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig }}"
+      when: not kubeconfig_file.stat.exists
+      
+    - name: Test cluster connectivity
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: default
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: cluster_test
+      
+    - name: Display cluster status
+      debug:
+        msg: "Cluster is accessible and operational"
+      when: cluster_test is succeeded
+      
+    - name: Label system nodes
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Node
+          metadata:
+            name: "{{ item }}"
+            labels:
+              node-role.kubernetes.io/system: "true"
+              nodepool: "system"
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      with_items: "{{ groups['system_nodes'] | default([]) }}"
+      when: groups['system_nodes'] is defined
+      
+    - name: Label application nodes
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Node
+          metadata:
+            name: "{{ item }}"
+            labels:
+              node-role.kubernetes.io/worker: "true"
+              nodepool: "application"
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      with_items: "{{ groups['application_nodes'] | default([]) }}"
+      when: groups['application_nodes'] is defined
+      
+    - name: Apply system node taints
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Node
+          metadata:
+            name: "{{ item }}"
+          spec:
+            taints:
+              - key: node-role.kubernetes.io/system
+                value: "true"
+                effect: NoSchedule
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      with_items: "{{ groups['system_nodes'] | default([]) }}"
+      when: groups['system_nodes'] is defined
+      
+    - name: Create kube-system priority class
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: system-cluster-critical
+          value: 2000001000
+          globalDefault: false
+          description: "Used for system critical pods that must run in the cluster"
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+        
+    - name: Create namespace for platform services
+      kubernetes.core.k8s:
+        name: platform-system
+        api_version: v1
+        kind: Namespace
+        state: present
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+        
+    - name: Configure network policies
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: default-deny-ingress
+            namespace: default
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+        
+    - name: Display cluster configuration summary
+      debug:
+        msg:
+          - "Kubernetes cluster configured successfully"
+          - "Cluster: {{ cluster_name }}"
+          - "Region: {{ region }}"
+          - "System nodes labeled and tainted"
+          - "Application nodes labeled for workloads"

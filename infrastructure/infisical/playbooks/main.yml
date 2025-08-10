@@ -1,8 +1,0 @@
----
-- name: Conditionally run Infisical bootstrap
-  import_playbook: infisical_bootstrap.yml
-  when: "'infisical_bootstrap' in playbooks_to_run"
-
-- name: Conditionally run Infisical secrets sync
-  import_playbook: infisical_secrets_sync.yml
-  when: "'infisical_secrets_sync' in playbooks_to_run"
